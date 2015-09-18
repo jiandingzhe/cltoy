@@ -26,7 +26,6 @@ if(NOT MSVC)
 endif()
 
 foreach(exec_name
-    foo
     show_plat_dev
     buffer_delay
 )

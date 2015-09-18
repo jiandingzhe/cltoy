@@ -7,6 +7,8 @@
 
 #if defined _WIN32 || defined _WIN64
 #include <windows.h>
+#undef min
+#undef max
 #else
 #include <sys/ioctl.h>
 #endif

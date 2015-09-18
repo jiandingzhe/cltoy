@@ -523,16 +523,16 @@ int main(int argc, char** argv)
 {
     parse_arg(argc, argv);
 
-    if (!get_gpu_platform_and_device(plat, dev))
-    {
-        printf("failed to get GPU device\n");
-        exit(1);
-    }
-
     cl_uint num_dim = 0;
     size_t* dim_sizes = nullptr;
+    
     if (mode != Dummy)
     {
+        if (!get_gpu_platform_and_device(plat, dev))
+        {
+            printf("failed to get GPU device\n");
+            exit(1);
+        }
         show_plat_info(plat);
         show_dev_info(dev, num_dim, dim_sizes);
         dim1_size = dim_sizes[0];
@@ -573,7 +573,10 @@ int main(int argc, char** argv)
 
         // clear result store
         for (int i = 0; i < num_sample; i++)
+        {
+            //printf("%d %f\n", i, data_result[i]);
             data_result[i] = 0.0f;
+        }
     }
 
 

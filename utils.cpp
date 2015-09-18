@@ -1,6 +1,7 @@
 #include "utils.h"
 
 #include <cstdio>
+#include <cstdlib>
 
 void show_all_platforms_and_devices()
 {
@@ -74,7 +75,7 @@ bool get_gpu_platform_and_device(cl_platform_id& plat, cl_device_id& dev)
         if (re != CL_SUCCESS)
         {
             fprintf(stderr, "failed to get platforms: error %d\n", re);
-            abort();
+            std::abort();
         }
     }
 

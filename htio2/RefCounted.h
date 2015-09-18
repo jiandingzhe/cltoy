@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#ifdef _MSC_VER
+#define noexcept throw()
+#endif
+
 class TestFramework;
 
 namespace htio2
