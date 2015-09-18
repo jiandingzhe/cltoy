@@ -8,6 +8,7 @@ float target[1024];
 
 int main(int argc, char** argv)
 {
+    FILE* fh = std::fopen("simple_tri.txt", "wb");
     for (int iter = 0; iter < 50000; iter++)
     {
         for (int i = 0; i < 1024; i++)
@@ -15,6 +16,9 @@ int main(int argc, char** argv)
             float tmp = i;
             result[i] = std::tan(tmp) + std::tan(2*tmp) + std::sin(tmp) + std::cos(tmp);
         }
-//        std::memcpy(target, result, sizeof(float) * 1024);
+
+        std::fwrite(result, sizeof(float), 1024, fh);
     }
+
+    fclose(fh);
 }
