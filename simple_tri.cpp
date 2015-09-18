@@ -4,7 +4,6 @@
 #include <cstdio>
 
 float result[1024];
-float target[1024];
 
 int main(int argc, char** argv)
 {
@@ -17,6 +16,15 @@ int main(int argc, char** argv)
             result[i] = std::tan(tmp) + std::tan(2*tmp) + std::sin(tmp) + std::cos(tmp);
         }
 
+        std::fwrite(result, sizeof(float), 1024, fh);
+
+        // reset result
+        for (int i = 0; i < 1024; i++)
+        {
+            result[i] = 0.0f;
+        }
+
+        // write again
         std::fwrite(result, sizeof(float), 1024, fh);
     }
 
