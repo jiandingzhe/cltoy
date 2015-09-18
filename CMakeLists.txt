@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+                        cmake_minimum_required(VERSION 3.0)
 project(cltoy)
 
 if(DEFINED CMAKE_BUILD_TYPE AND NOT CMAKE_BUILD_TYPE)
@@ -36,11 +36,11 @@ foreach(exec_name
     )
 
     if(NOT MSVC)
-        target_compile_options(${exec_name} PUBLIC -std=c++11)
+        target_compile_options(${exec_name} PUBLIC -std=c++11 -mavx -ffast-math)
     endif()
 
 endforeach()
 
-
+add_executable(simple_tri simple_tri.cpp)
 
 
