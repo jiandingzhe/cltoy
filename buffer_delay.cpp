@@ -3,6 +3,7 @@
 #include "htio2/OptionParser.h"
 
 #include <cstdio>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 
@@ -55,7 +56,7 @@ const char* src =
         "    {\n"
         "       int idx = tid * chunk_size + i;\n"
         "       if (idx >= num_sample) break;\n"
-        "       out[idx] = in[idx] * in[idx];\n"
+        "       out[idx] = tan(in[idx]) + tan(2 * in[idx]) + sin(in[idx]) + cos(in[idx]);\n"
         "    }\n"
         "}\n";
 
@@ -150,6 +151,8 @@ void parse_arg(int argc, char** argv)
 
 void create_context()
 {
+    if (mode == Dummy) return;
+
     cl_context_properties context_props[] = {
         CL_CONTEXT_PLATFORM, cl_context_properties(plat),
         0, 0
@@ -165,6 +168,8 @@ void create_context()
 
 void create_buffer_object()
 {
+    if (mode == Dummy) return;
+
     cl_int err = 0;
     printf("create buffers in context %p\n", context);
 
@@ -265,6 +270,8 @@ void create_buffer_object()
 char build_log[8192];
 void create_program_kernel()
 {
+    if (mode == Dummy) return;
+
     printf("create program\n");
     cl_int err = 0;
     prog = clCreateProgramWithSource(context, 1, &src, nullptr, &err);
@@ -296,6 +303,8 @@ void create_program_kernel()
 
 void create_cmd_queue()
 {
+    if (mode == Dummy) return;
+
     cl_int err = 0;
     cmd_queue = clCreateCommandQueue(context, dev, 0, &err);
     if (err != CL_SUCCESS)
@@ -307,6 +316,8 @@ void create_cmd_queue()
 
 void send_input()
 {
+    if (mode == Dummy) return;
+
     cl_int err = 0;
 
     if (mode == HostOnly)
@@ -374,62 +385,75 @@ void send_input()
 
 void run()
 {
-    cl_int err = 0;
-
-    int chunk_size = -1;
+    if (mode == Dummy)
     {
-        int rem = num_sample % dim1_size;
-        chunk_size = (num_sample - rem) / dim1_size;
-        if (rem) chunk_size += 1;
-    }
-    //    printf("%d samples, each chunk %d\n", num_sample, chunk_size);
-
-    if (mode == HostOnly)
-    {
-        err = clSetKernelArg(kern, 0, sizeof(cl_mem), &buf_input_host);
-        if (err != CL_SUCCESS)
+        for (int i = 0; i < num_sample; i++)
         {
-            printf("failed to set arg0 using host-side input buffer %p: %d\n", buf_input_host, err);
-            exit(1);
-        }
-
-        err = clSetKernelArg(kern, 1, sizeof(cl_mem), &buf_result_host);
-        if (err != CL_SUCCESS)
-        {
-            printf("failed to set arg0 using host-side result buffer %p\n: %d", buf_result_host, err);
-            exit(1);
+            float curr = data_input[i];
+            data_result[i] = std::tan(curr) + std::tan(2*curr) + std::sin(curr) + std::cos(curr);
         }
     }
-    else if (mode == DeviceOnly || mode == DualMap)
+    else
     {
-        err = clSetKernelArg(kern, 0, sizeof(cl_mem), &buf_input_dev);
-        if (err != CL_SUCCESS)
+        cl_int err = 0;
+
+        int chunk_size = -1;
         {
-            printf("failed to set arg0 using device-side input buffer %p\n: %d", buf_input_dev, err);
-            exit(1);
+            int rem = num_sample % dim1_size;
+            chunk_size = (num_sample - rem) / dim1_size;
+            if (rem) chunk_size += 1;
+        }
+        //    printf("%d samples, each chunk %d\n", num_sample, chunk_size);
+
+        if (mode == HostOnly)
+        {
+            err = clSetKernelArg(kern, 0, sizeof(cl_mem), &buf_input_host);
+            if (err != CL_SUCCESS)
+            {
+                printf("failed to set arg0 using host-side input buffer %p: %d\n", buf_input_host, err);
+                exit(1);
+            }
+
+            err = clSetKernelArg(kern, 1, sizeof(cl_mem), &buf_result_host);
+            if (err != CL_SUCCESS)
+            {
+                printf("failed to set arg0 using host-side result buffer %p\n: %d", buf_result_host, err);
+                exit(1);
+            }
+        }
+        else if (mode == DeviceOnly || mode == DualMap)
+        {
+            err = clSetKernelArg(kern, 0, sizeof(cl_mem), &buf_input_dev);
+            if (err != CL_SUCCESS)
+            {
+                printf("failed to set arg0 using device-side input buffer %p\n: %d", buf_input_dev, err);
+                exit(1);
+            }
+
+            err = clSetKernelArg(kern, 1, sizeof(cl_mem), &buf_result_dev);
+            if (err != CL_SUCCESS)
+            {
+                printf("failed to set arg0 using device-side result buffer %p\n: %d", buf_result_dev, err);
+                exit(1);
+            }
         }
 
-        err = clSetKernelArg(kern, 1, sizeof(cl_mem), &buf_result_dev);
-        if (err != CL_SUCCESS)
-        {
-            printf("failed to set arg0 using device-side result buffer %p\n: %d", buf_result_dev, err);
-            exit(1);
-        }
+        clSetKernelArg(kern, 2, sizeof(num_sample), &num_sample);
+        clSetKernelArg(kern, 3, sizeof(chunk_size), &chunk_size);
+
+        clEnqueueNDRangeKernel(cmd_queue, kern,
+                               1,
+                               nullptr, &dim1_size,
+                               nullptr,
+                               0, nullptr, nullptr);
+        clFinish(cmd_queue);
     }
-
-    clSetKernelArg(kern, 2, sizeof(num_sample), &num_sample);
-    clSetKernelArg(kern, 3, sizeof(chunk_size), &chunk_size);
-
-    clEnqueueNDRangeKernel(cmd_queue, kern,
-                           1,
-                           nullptr, &dim1_size,
-                           nullptr,
-                           0, nullptr, nullptr);
-    clFinish(cmd_queue);
 }
 
 void fetch_result()
 {
+    if (mode == Dummy) return;
+
     cl_int err = 0;
 
     if (mode == HostOnly)
@@ -507,9 +531,12 @@ int main(int argc, char** argv)
 
     cl_uint num_dim = 0;
     size_t* dim_sizes = nullptr;
-    show_plat_info(plat);
-    show_dev_info(dev, num_dim, dim_sizes);
-    dim1_size = dim_sizes[0];
+    if (mode != Dummy)
+    {
+        show_plat_info(plat);
+        show_dev_info(dev, num_dim, dim_sizes);
+        dim1_size = dim_sizes[0];
+    }
 
     create_context();
     create_cmd_queue();
@@ -535,8 +562,8 @@ int main(int argc, char** argv)
         {
             for (int i = 0; i < num_sample; i++)
             {
-                float expect = float(i) * float(i);
-                if (data_result[i] != expect)
+                float expect = std::tan(float(i)) + std::tan(float(2*i)) + std::sin(float(i)) + std::cos(float(i));
+                if (abs(data_result[i] - expect) > abs(expect) / 10000)
                 {
                     fprintf(stderr, "result data at %d is %f, which is not %f\n", i, data_result[i], expect);
                     abort();
