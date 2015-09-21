@@ -3,7 +3,7 @@
 #include <cstring>
 #include <cstdio>
 
-float result[1024];
+double result[1024];
 
 int main(int argc, char** argv)
 {
@@ -12,11 +12,11 @@ int main(int argc, char** argv)
     {
         for (int i = 0; i < 1024; i++)
         {
-            float tmp = i;
+            double tmp = i;
             result[i] = std::tan(tmp) + std::tan(2*tmp) + std::sin(tmp) + std::cos(tmp);
         }
 
-        std::fwrite(result, sizeof(float), 1024, fh);
+        std::fwrite(result, sizeof(double), 1024, fh);
 
         // reset result
         for (int i = 0; i < 1024; i++)
@@ -25,7 +25,7 @@ int main(int argc, char** argv)
         }
 
         // write again
-        std::fwrite(result, sizeof(float), 1024, fh);
+        std::fwrite(result, sizeof(double), 1024, fh);
     }
 
     fclose(fh);

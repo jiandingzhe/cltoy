@@ -7,68 +7,68 @@
 #include <cstdlib>
 #include <cstring>
 
-typedef enum {
-    Dummy = 0,
-    HostOnly = 1,
-    DeviceOnly = 2,
-    DualMap = 3,
-    Invalid = 255,
-} BufferMode;
-
-namespace htio2
-{
-template<>
-bool from_string<BufferMode>(const std::string& input, BufferMode& result)
-{
-    if (input == "host_only") result = HostOnly;
-    else if (input == "device_only") result = DeviceOnly;
-    else if (input == "dual_map") result = DualMap;
-    else if (input == "dummy") result = Dummy;
-    else return false;
-    return true;
-}
-
-template<>
-std::string to_string<BufferMode>(BufferMode input)
-{
-    switch (input)
-    {
-    case Dummy: return "dummy";
-    case HostOnly: return "host_only";
-    case DeviceOnly: return "device_only";
-    case DualMap: return "dual_map";
-    case Invalid: return "invalid";
-    default: abort();
-    }
-}
-
-}
-
-const char* src =
+const char* src_sin =
         "__kernel void hello(__global float* in,\n"
         "                    __global float* out,\n"
         "                    int num_sample,\n"
         "                    int chunk_size)\n"
         "{\n"
         "    int tid = get_global_id(0);\n"
-        "    \n"
         "    for (int i = 0; i < chunk_size; i++)\n"
         "    {\n"
         "       int idx = tid * chunk_size + i;\n"
         "       if (idx >= num_sample) break;\n"
-        "       out[idx] = tan(in[idx]) + tan(2 * in[idx]) + sin(in[idx]) + cos(in[idx]);\n"
+        "       float tmp = in[idx];\n"
+        "       out[idx] = sin(tmp) + sin(2 * tmp) + sin(tmp * tmp) + sin(tmp + 0.5);\n"
         "    }\n"
         "}\n";
 
-BufferMode mode = Invalid;
+const char* src_tan =
+        "__kernel void hello(__global float* in,\n"
+        "                    __global float* out,\n"
+        "                    int num_sample,\n"
+        "                    int chunk_size)\n"
+        "{\n"
+        "    int tid = get_global_id(0);\n"
+        "    for (int i = 0; i < chunk_size; i++)\n"
+        "    {\n"
+        "       int idx = tid * chunk_size + i;\n"
+        "       if (idx >= num_sample) break;\n"
+        "       float tmp = in[idx];\n"
+        "       out[idx] = tan(tmp) + tan(2 * tmp) + tan(tmp * tmp) + tan(tmp + 0.5);\n"
+        "    }\n"
+        "}\n";
+
+const char* src_mix =
+        "__kernel void hello(__global float* in,\n"
+        "                    __global float* out,\n"
+        "                    int num_sample,\n"
+        "                    int chunk_size)\n"
+        "{\n"
+        "    int tid = get_global_id(0);\n"
+        "    for (int i = 0; i < chunk_size; i++)\n"
+        "    {\n"
+        "       int idx = tid * chunk_size + i;\n"
+        "       if (idx >= num_sample) break;\n"
+        "       float tmp = in[idx];\n"
+        "       out[idx] = tan(tmp) + tan(2 * tmp) + sin(tmp * tmp) + cos(tmp + 0.5);\n"
+        "    }\n"
+        "}\n";
+
+BufferMode mode = BUFFER_MODE_INVALID;
+JobType job = JOB_TYPE_MIXED;
 int num_sample = 1024;
-int num_iter = 0;
+int num_iter = 1;
 bool help;
 bool do_validate;
 
-htio2::Option opt_mode("mode", 'm', "General Parameters",
+htio2::Option opt_mode("buffer-mode", 'm', "General Parameters",
                        &mode, 0,
-                       "dummy | host_only | device_only | dual_map", "MODE");
+                       "dummy | hostmap | devicemap | pinned", "MODE");
+
+htio2::Option opt_job("job", 'j', "Job Type",
+                      &job, 0,
+                      "mixed | sine | tangent", "JOB");
 
 htio2::Option opt_num_sample("num-sample", 'n', "General Parameters",
                              &num_sample, 0,
@@ -123,10 +123,17 @@ void parse_arg(int argc, char** argv)
 {
     htio2::OptionParser parser;
     parser.add_option(opt_mode);
+    parser.add_option(opt_job);
     parser.add_option(opt_num_sample);
     parser.add_option(opt_num_iter);
     parser.add_option(opt_validate);
     parser.add_option(opt_help);
+
+    if (argc == 1)
+    {
+        printf("%s\n", parser.format_document().c_str());
+        exit(0);
+    }
 
     parser.parse_options(argc, argv);
 
@@ -147,11 +154,23 @@ void parse_arg(int argc, char** argv)
         fprintf(stderr, "invalid iteration time: %d, must > 0\n", num_iter);
         exit(1);
     }
+
+    if (mode == BUFFER_MODE_INVALID)
+    {
+        fprintf(stderr, "buffer mode is invalid or not specified.\n");
+        exit(1);
+    }
+
+    if (job == JOB_TYPE_INVALID)
+    {
+        fprintf(stderr, "job type is invalid or not specified.\n");
+        exit(1);
+    }
 }
 
 void create_context()
 {
-    if (mode == Dummy) return;
+    if (mode == BUFFER_MODE_DUMMY) return;
 
     cl_context_properties context_props[] = {
         CL_CONTEXT_PLATFORM, cl_context_properties(plat),
@@ -168,13 +187,14 @@ void create_context()
 
 void create_buffer_object()
 {
-    if (mode == Dummy) return;
+    if (mode == BUFFER_MODE_DUMMY) return;
 
     cl_int err = 0;
     printf("create buffers in context %p\n", context);
 
-    if (mode == HostOnly)
+    if (mode == BUFFER_MODE_HOST_MAP)
     {
+        // buffers are created at host side, and are mapped when need to be used
         err = 0;
         buf_input_host = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, num_sample * sizeof(float), nullptr, &err);
         if (err != CL_SUCCESS)
@@ -191,8 +211,9 @@ void create_buffer_object()
             std::exit(1);
         }
     }
-    else if (mode == DeviceOnly)
+    else if (mode == BUFFER_MODE_DEVICE_MAP)
     {
+        // buffers are created at device side, and are mapped when need to be used
         err = 0;
         buf_input_dev = clCreateBuffer(context, CL_MEM_READ_ONLY, num_sample * sizeof(float), nullptr, &err);
         if (err != CL_SUCCESS)
@@ -209,8 +230,12 @@ void create_buffer_object()
             std::exit(1);
         }
     }
-    else if (mode == DualMap)
+    else if (mode == BUFFER_MODE_PINNED)
     {
+        // According to Nvidia's best practice guide
+        // Buffers are created at both host and device side, and are mapped now.
+        // When transferring data, data referred by host-side pointer is read/write to device side buffer.
+
         // input buffers
         err = 0;
         buf_input_host = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR, num_sample * sizeof(float), nullptr, &err);
@@ -270,11 +295,24 @@ void create_buffer_object()
 char build_log[8192];
 void create_program_kernel()
 {
-    if (mode == Dummy) return;
+    if (mode == BUFFER_MODE_DUMMY) return;
 
     printf("create program\n");
     cl_int err = 0;
-    prog = clCreateProgramWithSource(context, 1, &src, nullptr, &err);
+    switch(job)
+    {
+    case JOB_TYPE_MIXED:
+        prog = clCreateProgramWithSource(context, 1, &src_mix, nullptr, &err);
+        break;
+    case JOB_TYPE_SINE:
+        prog = clCreateProgramWithSource(context, 1, &src_sin, nullptr, &err);
+        break;
+    case JOB_TYPE_TANGENT:
+        prog = clCreateProgramWithSource(context, 1, &src_tan, nullptr, &err);
+        break;
+    default:
+        abort();
+    }
     if (err != CL_SUCCESS)
     {
         printf("failed to create program with error: %d\n", err);
@@ -303,8 +341,9 @@ void create_program_kernel()
 
 void create_cmd_queue()
 {
-    if (mode == Dummy) return;
+    if (mode == BUFFER_MODE_DUMMY) return;
 
+    printf("create command queue\n");
     cl_int err = 0;
     cmd_queue = clCreateCommandQueue(context, dev, 0, &err);
     if (err != CL_SUCCESS)
@@ -316,11 +355,11 @@ void create_cmd_queue()
 
 void send_input()
 {
-    if (mode == Dummy) return;
+    if (mode == BUFFER_MODE_DUMMY) return;
 
     cl_int err = 0;
 
-    if (mode == HostOnly)
+    if (mode == BUFFER_MODE_HOST_MAP)
     {
         pinned_input = clEnqueueMapBuffer(cmd_queue, buf_input_host, true, CL_MAP_WRITE,
                                           0, sizeof(float) * num_sample,
@@ -342,7 +381,7 @@ void send_input()
             std::exit(1);
         }
     }
-    else if (mode == DeviceOnly)
+    else if (mode == BUFFER_MODE_DEVICE_MAP)
     {
         pinned_input = clEnqueueMapBuffer(cmd_queue, buf_input_dev, true, CL_MAP_WRITE,
                                           0, sizeof(float) * num_sample,
@@ -364,7 +403,7 @@ void send_input()
             std::exit(1);
         }
     }
-    else if (mode == DualMap)
+    else if (mode == BUFFER_MODE_PINNED)
     {
         memcpy(pinned_input, data_input, sizeof(float) * num_sample);
 
@@ -385,12 +424,35 @@ void send_input()
 
 void run()
 {
-    if (mode == Dummy)
+    if (mode == BUFFER_MODE_DUMMY)
     {
-        for (int i = 0; i < num_sample; i++)
+        if (job == JOB_TYPE_SINE)
         {
-            float curr = data_input[i];
-            data_result[i] = std::tan(curr) + std::tan(2*curr) + std::sin(curr) + std::cos(curr);
+            for (int i = 0; i < num_sample; i++)
+            {
+                float curr = data_input[i];
+                data_result[i] = std::sin(curr) + std::sin(2.0*curr) + std::sin(curr*curr) + std::sin(curr+0.5);
+            }
+        }
+        else if (job == JOB_TYPE_TANGENT)
+        {
+            for (int i = 0; i < num_sample; i++)
+            {
+                float curr = data_input[i];
+                data_result[i] = std::tan(curr) + std::tan(2.0*curr) + std::tan(curr*curr) + std::tan(curr+0.5);
+            }
+        }
+        else if (job == JOB_TYPE_MIXED)
+        {
+            for (int i = 0; i < num_sample; i++)
+            {
+                float curr = data_input[i];
+                data_result[i] = std::tan(curr) + std::tan(2.0*curr) + std::sin(curr*curr) + std::cos(curr+0.5);
+            }
+        }
+        else
+        {
+            abort();
         }
     }
     else
@@ -405,7 +467,7 @@ void run()
         }
         //    printf("%d samples, each chunk %d\n", num_sample, chunk_size);
 
-        if (mode == HostOnly)
+        if (mode == BUFFER_MODE_HOST_MAP)
         {
             err = clSetKernelArg(kern, 0, sizeof(cl_mem), &buf_input_host);
             if (err != CL_SUCCESS)
@@ -421,7 +483,7 @@ void run()
                 exit(1);
             }
         }
-        else if (mode == DeviceOnly || mode == DualMap)
+        else if (mode == BUFFER_MODE_DEVICE_MAP || mode == BUFFER_MODE_PINNED)
         {
             err = clSetKernelArg(kern, 0, sizeof(cl_mem), &buf_input_dev);
             if (err != CL_SUCCESS)
@@ -452,11 +514,11 @@ void run()
 
 void fetch_result()
 {
-    if (mode == Dummy) return;
+    if (mode == BUFFER_MODE_DUMMY) return;
 
     cl_int err = 0;
 
-    if (mode == HostOnly)
+    if (mode == BUFFER_MODE_HOST_MAP)
     {
         pinned_result = clEnqueueMapBuffer(cmd_queue, buf_result_host, true, CL_MAP_READ,
                                            0, sizeof(float) * num_sample,
@@ -478,7 +540,7 @@ void fetch_result()
             exit(1);
         }
     }
-    else if (mode == DeviceOnly)
+    else if (mode == BUFFER_MODE_DEVICE_MAP)
     {
         pinned_result = clEnqueueMapBuffer(cmd_queue, buf_result_dev, true, CL_MAP_READ,
                                            0, sizeof(float) * num_sample,
@@ -500,7 +562,7 @@ void fetch_result()
             exit(1);
         }
     }
-    else if (mode == DualMap)
+    else if (mode == BUFFER_MODE_PINNED)
     {
         err = clEnqueueReadBuffer(cmd_queue, buf_result_dev, true,
                                   0, sizeof(float) * num_sample, pinned_result,
@@ -519,6 +581,36 @@ void fetch_result()
     }
 }
 
+void validate_result()
+{
+    for (int i = 0; i < num_sample; i++)
+    {
+        float tmp = data_input[i];
+        float expect = 0;
+
+        switch(job)
+        {
+        case JOB_TYPE_SINE:
+            expect = std::sin(tmp) + std::sin(tmp*2.0) + std::sin(tmp*tmp) + std::sin(tmp+0.5);
+            break;
+        case JOB_TYPE_TANGENT:
+            expect = std::tan(tmp) + std::tan(tmp*2.0) + std::tan(tmp*tmp) + std::tan(tmp+0.5);
+            break;
+        case JOB_TYPE_MIXED:
+            expect = std::tan(tmp) + std::tan(tmp*2.0) + std::sin(tmp*tmp) + std::cos(tmp+0.5);
+            break;
+        default:
+            abort();
+        }
+
+        if (abs(data_result[i] - expect) > abs(expect) / 10000)
+        {
+            fprintf(stderr, "result data at %d is %f, expect to be %f\n", i, data_result[i], expect);
+            abort();
+        }
+    }
+}
+
 int main(int argc, char** argv)
 {
     parse_arg(argc, argv);
@@ -526,7 +618,7 @@ int main(int argc, char** argv)
     cl_uint num_dim = 0;
     size_t* dim_sizes = nullptr;
     
-    if (mode != Dummy)
+    if (mode != BUFFER_MODE_DUMMY)
     {
         if (!get_gpu_platform_and_device(plat, dev))
         {
@@ -550,9 +642,9 @@ int main(int argc, char** argv)
         data_input[i] = i;
 
     // run
+    printf("run %d times\n", num_iter);
     for (int cycle = 0; cycle < num_iter; cycle++)
     {
-        //        printf("cycle %d\n", cycle);
         send_input();
         run();
         fetch_result();
@@ -560,26 +652,17 @@ int main(int argc, char** argv)
         // validate result
         if (do_validate)
         {
-            for (int i = 0; i < num_sample; i++)
-            {
-                float expect = std::tan(float(i)) + std::tan(float(2*i)) + std::sin(float(i)) + std::cos(float(i));
-                if (abs(data_result[i] - expect) > abs(expect) / 10000)
-                {
-                    fprintf(stderr, "result data at %d is %f, which is not %f\n", i, data_result[i], expect);
-                    abort();
-                }
-            }
+            validate_result();
         }
 
-        // clear result store
+        // clear store
         for (int i = 0; i < num_sample; i++)
         {
-            //printf("%d %f\n", i, data_result[i]);
             data_result[i] = 0.0f;
         }
     }
 
-
+    printf("finalize\n");
     free(data_input);
     free(data_result);
 }

@@ -3,6 +3,58 @@
 #include <cstdio>
 #include <cstdlib>
 
+namespace htio2
+{
+template<>
+bool from_string<BufferMode>(const std::string& input, BufferMode& result)
+{
+    if (input == "hostmap") result = BUFFER_MODE_HOST_MAP;
+    else if (input == "devicemap") result = BUFFER_MODE_DEVICE_MAP;
+    else if (input == "pinned") result = BUFFER_MODE_PINNED;
+    else if (input == "dummy") result = BUFFER_MODE_DUMMY;
+    else return false;
+    return true;
+}
+
+template<>
+bool from_string<JobType>(const std::string& input, JobType& result)
+{
+    if (input == "mixed") result = JOB_TYPE_MIXED;
+    else if (input == "sine") result = JOB_TYPE_SINE;
+    else if (input == "tangent") result = JOB_TYPE_TANGENT;
+    else return false;
+    return true;
+}
+
+template<>
+std::string to_string<BufferMode>(BufferMode input)
+{
+    switch (input)
+    {
+    case BUFFER_MODE_DUMMY: return "dummy";
+    case BUFFER_MODE_HOST_MAP: return "hostmap";
+    case BUFFER_MODE_DEVICE_MAP: return "devicemap";
+    case BUFFER_MODE_PINNED: return "pinned";
+    case BUFFER_MODE_INVALID: return "invalid";
+    default: abort();
+    }
+}
+
+template<>
+std::string to_string<JobType>(JobType input)
+{
+    switch (input)
+    {
+    case JOB_TYPE_MIXED: return "mixed";
+    case JOB_TYPE_SINE: return "sine";
+    case JOB_TYPE_TANGENT: return "tangent";
+    case JOB_TYPE_INVALID: return "invalid";
+    default: abort();
+    }
+}
+
+} // namespace htio2
+
 void show_all_platforms_and_devices()
 {
     cl_platform_id plats[256];
